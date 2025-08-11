@@ -8,6 +8,6 @@ DROP TABLE IF EXISTS user_devices_cumulated;
 CREATE TABLE user_devices_cumulated(
 	device_id TEXT,
 	event_time DATE,
-	device_activity_datelist JSON,
-	PRIMARY KEY (device_id)
+	device_activity_datelist  JSONB,
+	PRIMARY KEY (device_id,event_time)
 )
