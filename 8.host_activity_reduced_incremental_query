@@ -1,44 +1,51 @@
 - An incremental query that loads `host_activity_reduced`
  - day-by-day
-
+-- Step 1: Aggregate daily hits and unique users from events table for a specific date
 WITH daily_aggregate AS (
     SELECT 
-        host,
-        COUNT(1) AS hit_count,
-        ARRAY_AGG(DISTINCT user_id ORDER BY user_id) AS users_array,
-        DATE(event_time) AS date
+        host,                                   -- Host identifier
+        COUNT(1) AS hit_count,                  -- Total number of events (hits) for the host that day
+        ARRAY_AGG(DISTINCT user_id ORDER BY user_id) AS users_array,  -- Array of distinct users active on that day
+        DATE(event_time) AS date                 -- Date of the events (aggregation day)
     FROM events 
-    WHERE DATE(event_time) = DATE('2023-01-04')
-      AND host IS NOT NULL
-    GROUP BY host, DATE(event_time)
+    WHERE DATE(event_time) = DATE('2023-01-04')  -- Process data for this specific date only (incremental)
+      AND host IS NOT NULL                         -- Ignore rows without a host
+    GROUP BY host, DATE(event_time)                -- Group by host and day
 ),
+
+-- Step 2: Get existing monthly aggregates from the reduced fact table for the previous month snapshot
 yesterday_array AS (
     SELECT *
     FROM host_activity_reduced
-    WHERE month_start = DATE('2023-01-03')
+    WHERE month_start = DATE('2023-01-03')  -- The month snapshot date before current aggregation (adjust as needed)
 ),
+
+-- Step 3: Combine today's daily aggregates with existing monthly aggregates
 finalaggregate AS (
     SELECT 
-        COALESCE(da.host, ya.host) AS host, 
-        DATE(COALESCE(ya.month_start, DATE_TRUNC('month', da.date))) AS month_start, 
-        'site_visits' AS metric_name, 
+        COALESCE(da.host, ya.host) AS host,   -- Prefer today's host if available, else yesterday's
+        DATE(COALESCE(ya.month_start, DATE_TRUNC('month', da.date))) AS month_start,  
+        -- Determine month start: use existing month_start or truncate today's date to month start
+        'site_visits' AS metric_name,          -- Fixed metric name to identify this metric in the table
         CASE 
             WHEN ya.unique_visitors IS NOT NULL THEN 
-                COALESCE(ya.hit_count,0) + COALESCE(da.hit_count,0)
-            ELSE COALESCE(da.hit_count,0)
+                COALESCE(ya.hit_count,0) + COALESCE(da.hit_count,0)  -- Add today's hits to existing monthly hits
+            ELSE COALESCE(da.hit_count,0)                            -- If no prior data, use today's hits
         END AS hit_count,
         CASE 
             WHEN ya.unique_visitors IS NOT NULL THEN 
-                COALESCE(ya.unique_visitors, '{}') || COALESCE(da.users_array, '{}')
-            ELSE COALESCE(da.users_array, '{}')
+                COALESCE(ya.unique_visitors, '{}') || COALESCE(da.users_array, '{}')  
+                -- Append today's unique visitors array to existing monthly array
+            ELSE COALESCE(da.users_array, '{}')                       -- If no prior data, use today's users array
         END AS unique_visitors
     FROM daily_aggregate da
     FULL OUTER JOIN yesterday_array ya 
         ON da.host = ya.host
        AND DATE_TRUNC('month', COALESCE(da.date, ya.month_start)) = COALESCE(ya.month_start, DATE_TRUNC('month', da.date))
+       -- Join on host and the month period
 )
 
-
+-- Step 4: Insert or update the monthly aggregates back into the reduced fact table
 INSERT INTO host_activity_reduced 
 SELECT
     host,
@@ -47,10 +54,10 @@ SELECT
     hit_count,
     unique_visitors
 FROM finalaggregate
+
+-- On conflict (same host, month, metric), update existing row instead of inserting duplicate
 ON CONFLICT (host, month_start, metric_name)
 DO UPDATE
 SET
-    hit_count = EXCLUDED.hit_count,
-    unique_visitors = EXCLUDED.unique_visitors;
-
-
+    hit_count = EXCLUDED.hit_count,               -- Replace hit count with new value
+    unique_visitors = EXCLUDED.unique_visitors;   -- Replace unique visitors array with new value
