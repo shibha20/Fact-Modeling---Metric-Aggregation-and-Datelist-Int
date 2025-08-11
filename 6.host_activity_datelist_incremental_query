@@ -1,9 +1,14 @@
  - The incremental query to generate `host_activity_datelist`
+-- Incremental query to generate and insert `host_activity_datelist` for a specific day
+
 INSERT INTO hosts_cumulated (host, event_time, device_activity_datelist)
 SELECT
-    host,
-    DATE(event_time) AS event_time,
-    ARRAY[event_time] AS device_activity_datelist
+    host,                                -- Host identifier from events
+    DATE(event_time) AS event_time,     -- Extract the date part of the event time (snapshot date)
+    ARRAY[event_time] AS device_activity_datelist  -- Create an array with the single active datetime for this event
 FROM events e
-WHERE DATE(event_time) = DATE '2023-01-02'  -- today’s date
-ON CONFLICT (host, event_time) DO NOTHING;  -- avoid duplicates
+WHERE DATE(event_time) = DATE '2023-01-02'  -- Filter events only for today's date to process incrementally
+
+-- On conflict of (host, event_time) (i.e., duplicate key), do nothing
+-- This avoids inserting duplicate rows if the host-date combination already exists
+ON CONFLICT (host, event_time) DO NOTHING;
