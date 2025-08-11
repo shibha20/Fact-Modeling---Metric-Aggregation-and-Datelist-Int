@@ -4,42 +4,49 @@
 
 
 
-
+-- Step 1: Select all rows from the cumulative device activity table for a specific snapshot date
 WITH users AS (
-	SELECT *
-	FROM deviceact_cumulated 
-	WHERE date = '2023-01-03'::date
+    SELECT *
+    FROM deviceact_cumulated 
+    WHERE date = '2023-01-03'::date  -- The date snapshot we want to convert to integer format
 ),
+
+-- Step 2: Generate a series of dates covering the period of interest
 series AS (
-	SELECT series_date
-	FROM generate_series(
-		'2023-01-01'::date,
-		'2023-01-31'::date,
-		'1 day'::interval
-	) AS series(series_date)
+    SELECT series_date
+    FROM generate_series(
+        '2023-01-01'::date,  -- Start date of the period
+        '2023-01-31'::date,  -- End date of the period
+        '1 day'::interval    -- Step by 1 day intervals
+    ) AS series(series_date)
+),
+
+-- Step 3: For each user-device and each date in the series, check if the user was active on that date
+placeholderint AS (
+    SELECT 
+        -- If the user was active on 'series_date' (dates_active contains that date),
+        -- then calculate a 32-bit number with exactly one bit set to 1.
+        -- The position of this bit encodes how far this date is from the main date.
+        -- Otherwise, return zero (no bits set).
+        CAST(
+            CASE 
+                WHEN dates_active @> ARRAY[series_date::date] THEN
+                    -- POW(2, 32 - (date - series_date)) creates a bit mask with one bit set.
+                    -- Casting to BIGINT to support large bit shifts.
+                    CAST(POW(2, 32 - (date - DATE(series_date::date))) AS BIGINT)
+                ELSE 0
+            END 
+        AS BIT(32)) AS placeholder_int_value,
+        *
+    FROM users
+    CROSS JOIN series
 )
---checks if series_date is in dates_active 
-, placeholderint AS (
-	SELECT 
-/*It checks if the user was active on that day (dates_active contains that date).
-If yes, it creates a number that has one bit turned on in a 32-bit number. 
-Which bit is turned on depends on how far that day is from the user's main date.
-If no, it returns zero (no bits turned on).
-Then, it turns this number into a 32-bit binary string (a sequence of 0s and 1s)*/
-	CAST(CASE WHEN 
-		dates_active @> ARRAY[series_date::date]
-		THEN CAST(POW(2,32-(date-DATE(series_date::date))) AS BIGINT)
-		ELSE 0 
-		END AS BIT(32)) AS placeholder_int_value,
-	*
-	FROM users
-	CROSS JOIN series)
 
-
-
-
---integers are easier to compress
-SELECT user_id,device_id, SUM(CAST(placeholder_int_value AS BIGINT))  AS datelist_int
-FROM 
-placeholderint
-GROUP BY user_id,device_id
+-- Step 4: Aggregate the bitmasks by user and device, summing the values to produce a single integer
+-- This integer effectively encodes the user's active dates within the period as bits in a 32-bit number.
+SELECT 
+    user_id,
+    device_id,
+    SUM(CAST(placeholder_int_value AS BIGINT)) AS datelist_int
+FROM placeholderint
+GROUP BY user_id, device_id;
