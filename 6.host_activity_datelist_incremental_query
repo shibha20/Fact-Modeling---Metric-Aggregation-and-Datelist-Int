@@ -1,0 +1,9 @@
+ - The incremental query to generate `host_activity_datelist`
+INSERT INTO hosts_cumulated (host, event_time, device_activity_datelist)
+SELECT
+    host,
+    DATE(event_time) AS event_time,
+    ARRAY[event_time] AS device_activity_datelist
+FROM events e
+WHERE DATE(event_time) = DATE '2023-01-02'  -- today’s date
+ON CONFLICT (host, event_time) DO NOTHING;  -- avoid duplicates
