@@ -3,42 +3,52 @@
 - A cumulative query to generate `device_activity_datelist` from `events`
 
 
+-- Drop the cumulative table if it exists (to refresh data)
 DROP TABLE IF EXISTS deviceact_cumulated;
-CREATE TABLE deviceact_cumulated(
-	user_id TEXT,
-	device_id TEXT,
-	dates_active DATE[],
-	date DATE,
-	PRIMARY KEY (user_id,device_id,date)
-)
 
+-- Create a table to store cumulative active dates for each (user_id, device_id) per day
+CREATE TABLE deviceact_cumulated (
+    user_id TEXT NOT NULL,         -- User identifier
+    device_id TEXT NOT NULL,       -- Device identifier
+    dates_active DATE[] NOT NULL,  -- Array of all dates the user was active on this device (cumulative)
+    date DATE NOT NULL,            -- The "snapshot" date representing the row's aggregation day
+    PRIMARY KEY (user_id, device_id, date)  -- Composite primary key to avoid duplicates per day
+);
 
-DELETE FROM deviceact_cumulated
+-- Clear out any existing data before re-inserting cumulative data
+DELETE FROM deviceact_cumulated;
 
-
+-- Step 1: Get the cumulative data from the previous day (yesterday)
 WITH yesterday AS (
-	SELECT * FROM deviceact_cumulated
-	WHERE date = '2023-01-03'
-),today AS (
-	SELECT DISTINCT user_id ::TEXT,device_id::TEXT,DATE(event_time) AS date_active
-	FROM events 
-	WHERE DATE(event_time) = DATE '2023-01-04'
-	AND user_id IS NOT NULL
-	AND device_id IS NOT NULL
+    SELECT * 
+    FROM deviceact_cumulated
+    WHERE date = '2023-01-03'  -- The last snapshot date (replace with desired date)
+),
+
+-- Step 2: Get distinct active user-device pairs for today
+today AS (
+    SELECT DISTINCT 
+        user_id::TEXT,
+        device_id::TEXT,
+        DATE(event_time) AS date_active
+    FROM events
+    WHERE DATE(event_time) = DATE '2023-01-04' -- The current day to process
+      AND user_id IS NOT NULL
+      AND device_id IS NOT NULL
 )
 
-
+-- Step 3: Insert cumulative data for today, merging yesterday's data and today's new activity
 INSERT INTO deviceact_cumulated
-SELECT 
-  COALESCE(t.user_id, y.user_id),
-  COALESCE(t.device_id, y.device_id),
-  CASE 
-    WHEN y.dates_active IS NULL THEN ARRAY[t.date_active]
-    WHEN t.date_active IS NOT NULL THEN ARRAY[t.date_active] || y.dates_active 
-    ELSE 	y.dates_active
-  END AS dates_active,
-  COALESCE(t.date_active, (y.date + INTERVAL '1 day')::DATE) AS date
+SELECT
+    COALESCE(t.user_id, y.user_id) AS user_id,             -- Prefer today's user_id; fallback to yesterday's
+    COALESCE(t.device_id, y.device_id) AS device_id,       -- Prefer today's device_id; fallback to yesterday's
+    CASE
+        WHEN y.dates_active IS NULL THEN ARRAY[t.date_active]         -- If no previous data, start with today's date
+        WHEN t.date_active IS NOT NULL THEN ARRAY[t.date_active] || y.dates_active  -- Append today's date to existing array
+        ELSE y.dates_active                                           -- If no new activity today, keep old array
+    END AS dates_active,
+    COALESCE(t.date_active, (y.date + INTERVAL '1 day')::DATE) AS date  -- Use today's date or increment yesterday's date by 1
 FROM today t
 FULL OUTER JOIN yesterday y
-ON t.device_id = y.device_id
-AND t.user_id = y.user_id;
+    ON t.device_id = y.device_id
+   AND t.user_id = y.user_id;
