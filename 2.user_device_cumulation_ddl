@@ -1,13 +1,21 @@
-- A DDL for an `user_devices_cumulated` table that has:
- - a `device_activity_datelist` which tracks a users active days by `browser_type`
- - data type here should look similar to `MAP<STRING, ARRAY[DATE]>`
-   - or you could have `browser_type` as a column with multiple rows for each user (either way works, just be consistent!)
-
-
+-- Drop the table if it already exists to allow recreation
 DROP TABLE IF EXISTS user_devices_cumulated;
-CREATE TABLE user_devices_cumulated(
-	device_id TEXT,
-	event_time DATE,
-	device_activity_datelist  JSONB,
-	PRIMARY KEY (device_id,event_time)
-)
+
+-- Create the user_devices_cumulated table
+CREATE TABLE user_devices_cumulated (
+    -- Unique identifier for each device
+    device_id TEXT NOT NULL,
+    
+    -- The date representing this record's aggregation day
+    -- This allows tracking changes or activity by day per device
+    event_time DATE NOT NULL,
+    
+    -- JSONB column to store a map-like structure:
+    -- Keys are browser types (e.g., "chrome", "safari")
+    -- Values are arrays of dates when the device was active on that browser
+    -- Example: {"chrome": ["2023-01-01", "2023-01-02"], "safari": ["2023-01-03"]}
+    device_activity_datelist JSONB NOT NULL,
+    
+    -- Composite primary key to ensure uniqueness per device per day
+    PRIMARY KEY (device_id, event_time)
+);
