@@ -1,0 +1,44 @@
+
+
+- A cumulative query to generate `device_activity_datelist` from `events`
+
+
+DROP TABLE IF EXISTS deviceact_cumulated;
+CREATE TABLE deviceact_cumulated(
+	user_id TEXT,
+	device_id TEXT,
+	dates_active DATE[],
+	date DATE,
+	PRIMARY KEY (user_id,device_id,date)
+)
+
+
+DELETE FROM deviceact_cumulated
+
+
+WITH yesterday AS (
+	SELECT * FROM deviceact_cumulated
+	WHERE date = '2023-01-03'
+),today AS (
+	SELECT DISTINCT user_id ::TEXT,device_id::TEXT,DATE(event_time) AS date_active
+	FROM events 
+	WHERE DATE(event_time) = DATE '2023-01-04'
+	AND user_id IS NOT NULL
+	AND device_id IS NOT NULL
+)
+
+
+INSERT INTO deviceact_cumulated
+SELECT 
+  COALESCE(t.user_id, y.user_id),
+  COALESCE(t.device_id, y.device_id),
+  CASE 
+    WHEN y.dates_active IS NULL THEN ARRAY[t.date_active]
+    WHEN t.date_active IS NOT NULL THEN ARRAY[t.date_active] || y.dates_active 
+    ELSE 	y.dates_active
+  END AS dates_active,
+  COALESCE(t.date_active, (y.date + INTERVAL '1 day')::DATE) AS date
+FROM today t
+FULL OUTER JOIN yesterday y
+ON t.device_id = y.device_id
+AND t.user_id = y.user_id;
