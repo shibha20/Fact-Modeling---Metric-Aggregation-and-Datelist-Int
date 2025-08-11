@@ -1,0 +1,56 @@
+- An incremental query that loads `host_activity_reduced`
+ - day-by-day
+
+WITH daily_aggregate AS (
+    SELECT 
+        host,
+        COUNT(1) AS hit_count,
+        ARRAY_AGG(DISTINCT user_id ORDER BY user_id) AS users_array,
+        DATE(event_time) AS date
+    FROM events 
+    WHERE DATE(event_time) = DATE('2023-01-04')
+      AND host IS NOT NULL
+    GROUP BY host, DATE(event_time)
+),
+yesterday_array AS (
+    SELECT *
+    FROM host_activity_reduced
+    WHERE month_start = DATE('2023-01-03')
+),
+finalaggregate AS (
+    SELECT 
+        COALESCE(da.host, ya.host) AS host, 
+        DATE(COALESCE(ya.month_start, DATE_TRUNC('month', da.date))) AS month_start, 
+        'site_visits' AS metric_name, 
+        CASE 
+            WHEN ya.unique_visitors IS NOT NULL THEN 
+                COALESCE(ya.hit_count,0) + COALESCE(da.hit_count,0)
+            ELSE COALESCE(da.hit_count,0)
+        END AS hit_count,
+        CASE 
+            WHEN ya.unique_visitors IS NOT NULL THEN 
+                COALESCE(ya.unique_visitors, '{}') || COALESCE(da.users_array, '{}')
+            ELSE COALESCE(da.users_array, '{}')
+        END AS unique_visitors
+    FROM daily_aggregate da
+    FULL OUTER JOIN yesterday_array ya 
+        ON da.host = ya.host
+       AND DATE_TRUNC('month', COALESCE(da.date, ya.month_start)) = COALESCE(ya.month_start, DATE_TRUNC('month', da.date))
+)
+
+
+INSERT INTO host_activity_reduced 
+SELECT
+    host,
+    month_start,
+    metric_name,
+    hit_count,
+    unique_visitors
+FROM finalaggregate
+ON CONFLICT (host, month_start, metric_name)
+DO UPDATE
+SET
+    hit_count = EXCLUDED.hit_count,
+    unique_visitors = EXCLUDED.unique_visitors;
+
+
