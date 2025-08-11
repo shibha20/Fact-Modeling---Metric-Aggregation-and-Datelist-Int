@@ -1,0 +1,12 @@
+- A DDL for `hosts_cumulated` table
+ - a `host_activity_datelist` which logs to see which dates each host is experiencing any activity
+
+
+DROP TABLE IF EXISTS hosts_cumulated;
+CREATE TABLE hosts_cumulated(
+	host TEXT,
+	event_time DATE,
+	device_activity_datelist TEXT[],
+	PRIMARY KEY (host,event_time)
+	
+)
