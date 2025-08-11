@@ -1,16 +1,13 @@
-- A monthly, reduced fact table DDL `host_activity_reduced`
-  - month
-  - host
-  - hit_array - think COUNT(1)
-  - unique_visitors array -  think COUNT(DISTINCT user_id)
-
-
+-- Drop the table if it exists to allow recreating the monthly reduced fact table
 DROP TABLE IF EXISTS host_activity_reduced;
-CREATE TABLE host_activity_reduced(
-	host TEXT,
-	month_start DATE,
-	metric_name TEXT,
-	hit_count INTEGER,
-	unique_visitors REAL[],
-	PRIMARY KEY(host,month_start,metric_name)
-)
+
+-- Create the reduced fact table for host activity aggregated monthly
+CREATE TABLE host_activity_reduced (
+    host TEXT NOT NULL,               -- Identifier for the host (e.g., website or service)
+    month_start DATE NOT NULL,        -- The first day of the month representing the aggregation period
+    metric_name TEXT NOT NULL,        -- Name of the metric, e.g., 'hit_count' or 'unique_visitors'
+    hit_count INTEGER,                -- Total count of hits (e.g., COUNT(1)) for the host in the month
+    unique_visitors REAL[],           -- Array of unique visitors (e.g., COUNT(DISTINCT user_id) or list of visitor IDs)
+                                     -- Using REAL[] here, but usually this might be TEXT[] or INTEGER[] depending on visitor IDs format
+    PRIMARY KEY (host, month_start, metric_name)  -- Composite primary key to ensure uniqueness per host, month, and metric
+);
